@@ -1,0 +1,13 @@
+[node]
+network = "testnet"
+listening_port = 9735
+data_dir = "./data"
+
+[nostr]
+relay = "ws://localhost:7777"
+private_key = "nsec1abc123..."
+
+[wallet]
+max_channel_size_sats = 1000000
+min_channel_size_sats = 20000
+auto_accept_channels = false

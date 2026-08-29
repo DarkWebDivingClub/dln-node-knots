@@ -1,0 +1,96 @@
+use std::collections::HashMap;
+use std::time::Duration;
+
+use dln_node::{clear_usage_profiles, set_relay_pubkey, MethodAccessRule, UsageProfile};
+use nostr_sdk::prelude::*;
+use nwc::nostr::nips::nip47::{Method, NostrWalletConnectUri, Request, Response};
+
+mod common;
+use common::{grant_usage_profile, start_relay, test_guard};
+
+/// End-to-end test: owner grants get_info to a user, user calls get_info and succeeds.
+#[tokio::test]
+async fn test_get_info_with_granted_profile() -> Result<()> {
+    let _guard = test_guard();
+    clear_usage_profiles();
+
+    let (_container, relay_url) = start_relay().await;
+    println!("Relay started at {}", relay_url);
+
+    let relay_pubkey = Keys::generate().public_key();
+    set_relay_pubkey(relay_pubkey.clone());
+    println!("Relay pubkey set for grants: {}", relay_pubkey);
+
+    let service_keys = Keys::generate();
+    let service_pubkey = service_keys.public_key();
+    let _service_client = dln_node::run_nwc_service(service_keys, &relay_url).await?;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    println!("Service started with pubkey {}", service_pubkey);
+
+    let user_keys = Keys::generate();
+    let user_pubkey = user_keys.public_key();
+    println!("Grant target pubkey: {}", user_pubkey);
+
+    let mut methods = HashMap::new();
+    methods.insert(Method::GetInfo, MethodAccessRule { access_rate: None });
+    let profile = UsageProfile {
+        quota: None,
+        methods: Some(methods),
+        control: None,
+    };
+    let owner_keys = Keys::generate();
+    grant_usage_profile(&owner_keys, &relay_url, relay_pubkey, user_pubkey, &profile).await?;
+    println!("Grant event published");
+
+    // Build NWC URI for the user to talk to the service.
+    let client_secret = user_keys.secret_key().clone();
+    let relay = RelayUrl::parse(&relay_url)?;
+    let uri = NostrWalletConnectUri::new(service_pubkey, vec![relay], client_secret.clone(), None);
+
+    let nwc_client = Client::builder().signer(user_keys).build();
+    nwc_client.add_relay(&relay_url).await?;
+    nwc_client.connect().await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    println!("User client connected");
+
+    let filter = Filter::new()
+        .kind(Kind::WalletConnectResponse)
+        .author(service_pubkey);
+    nwc_client.subscribe(filter).await?;
+
+    let request_event = Request::get_info()
+        .to_event(&uri)
+        .expect("Failed to create NWC request event");
+    nwc_client.send_event(&request_event).await?;
+    println!("Sent get_info request");
+
+    let timeout = Duration::from_secs(10);
+    let uri_clone = uri.clone();
+    let result = tokio::time::timeout(timeout, async {
+        let mut notifications = nwc_client.notifications();
+        while let Some(notification) = notifications.next().await {
+            if let ClientNotification::Event { event, .. } = notification {
+                let event = event.as_ref();
+                if event.kind == Kind::WalletConnectResponse && event.pubkey == service_pubkey {
+                    let response = Response::from_event(&uri_clone, event)
+                        .expect("Failed to decrypt NWC response");
+                    let info = response
+                        .to_get_info()
+                        .expect("Response was not a valid get_info");
+                    assert_eq!(info.alias, Some("dln-node".to_string()));
+                    assert_eq!(info.methods, vec![Method::GetInfo]);
+                    println!("Received get_info response");
+                    break;
+                }
+            }
+        }
+        Ok::<(), nostr_sdk::client::Error>(())
+    })
+    .await;
+
+    match result {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => panic!("Notification handler error: {}", e),
+        Err(_) => panic!("Timeout: did not receive get_info response within 10 seconds"),
+    }
+}
