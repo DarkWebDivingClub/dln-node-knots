@@ -7,8 +7,6 @@ It takes its chain data from a Bitcoin Core RPC endpoint, exposes no HTTP or
 gRPC surface, and delegates signing to an external signer that can live in
 another process — or, for tests, in-process or not at all.
 
-Forked from `FlowRateHQ/eln-node` and renamed for dwdc.
-
 ## Control plane
 
 Nostr is the node's only API. There is no CLI and no local socket. Two message
