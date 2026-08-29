@@ -25,7 +25,8 @@ pub struct LdkServiceConfig {
     pub ldk_storage_dir: String,
     pub ldk_listen_addr: Option<String>,
     pub node_alias: Option<String>,
-    /// Signer transport type: "nostr" or "embedded" (default).
+    /// Signer transport: "nostr" (remote VLS), "none" (plain LDK keys,
+    /// no VLS), or "embedded" (in-process VLS signer, the default).
     pub signer_transport: String,
     /// Nostr relay URL (required when signer_transport = "nostr").
     pub signer_relay: Option<String>,
@@ -293,6 +294,11 @@ impl LdkService {
             _ => return Err(LdkServiceInitError::InvalidNetwork { network: cfg.network.clone() }),
         };
 
+        // "none" bypasses VLS entirely and lets ldk-node use its own
+        // KeysManager and BDK wallet, seeded from its storage dir. Intended for
+        // tests and bring-up: there is no policy validation on this path.
+        let use_vls = cfg.signer_transport.as_str() != "none";
+
         // Create transport: either Nostr (remote signer) or embedded (in-process)
         let transport: Arc<dyn ldk_vls2_client::Transport> = match cfg.signer_transport.as_str() {
             "nostr" => {
@@ -330,10 +336,12 @@ impl LdkService {
         };
 
         let network_name = cfg.network.to_lowercase();
-        let keys_manager = Arc::new(ldk_vls2_client::KeysManagerClient::new(
-            transport,
-            &network_name,
-        ));
+        let keys_manager = use_vls.then(|| {
+            Arc::new(ldk_vls2_client::KeysManagerClient::new(
+                transport,
+                &network_name,
+            ))
+        });
 
         let mut builder = Builder::new();
         builder.set_network(network);
@@ -345,16 +353,20 @@ impl LdkService {
         );
         builder.set_storage_dir_path(cfg.ldk_storage_dir.clone());
 
-        // Inject VLS signer via bridge wrapper
-        let bridge = Arc::new(vls_keys_bridge::VlsKeysInterface {
-            inner: keys_manager.clone(),
-        });
-        builder.set_custom_keys_interface(bridge);
+        if let Some(km) = &keys_manager {
+            // Inject VLS signer via bridge wrapper
+            let bridge = Arc::new(vls_keys_bridge::VlsKeysInterface {
+                inner: km.clone(),
+            });
+            builder.set_custom_keys_interface(bridge);
 
-        // Configure watch-only BDK wallet with VLS signing
-        let xpub = keys_manager.xpub();
-        let bdk_signer = Arc::new(keys_manager.bdk_signer());
-        builder.set_custom_wallet(xpub, bdk_signer);
+            // Configure watch-only BDK wallet with VLS signing
+            let xpub = km.xpub();
+            let bdk_signer = Arc::new(km.bdk_signer());
+            builder.set_custom_wallet(xpub, bdk_signer);
+        } else {
+            eprintln!("Using plain LDK keys (no VLS signer)");
+        }
 
         if let Some(listen_addr) = &cfg.ldk_listen_addr {
             let socket = SocketAddress::from_str(listen_addr).map_err(|_| {
@@ -382,7 +394,7 @@ impl LdkService {
         Ok(Arc::new(Self {
             node: Arc::new(node),
             network,
-            keys_manager: Some(keys_manager),
+            keys_manager,
         }))
     }
 
