@@ -1,11 +1,59 @@
-# Diamond Lightning Node
+# Diamond Lightning Node — Bitcoin Knots variant
 
-`dln-node` is a Lightning node built on [`ldk-node`], controlled entirely over
-Nostr and designed to run without holding its own keys.
+The Bitcoin Knots build of [`dln-node`](https://github.com/DarkWebDivingClub/dln-node),
+for the chain that splits away with the BLAKE2b proof-of-work change.
 
-It takes its chain data from a Bitcoin Core RPC endpoint, exposes no HTTP or
-gRPC surface, and delegates signing to an external signer that can live in
-another process — or, for tests, in-process or not at all.
+It is a Lightning node built on [`ldk-node`], controlled entirely over Nostr
+and designed to run without holding its own keys. It takes its chain data
+from a bitcoind RPC endpoint, exposes no HTTP or gRPC surface, and delegates
+signing to an external signer that can live in another process — or, for
+tests, in-process or not at all.
+
+## Why this repo exists
+
+`dln-node` and this fork produce different binaries because Cargo's `[patch]`
+is workspace-global: one workspace cannot build both a stock node and one
+patched for BLAKE2b headers. A cross-chain swap needs both binaries running
+at the same time, so they need separate working trees.
+
+**Today it is byte-identical to `dln-node`.** That is expected, and it is the
+point of proceeding in this order.
+
+## Level 0
+
+The BLAKE2b hard fork is height-activated on `consensus.Blake2bHeight`.
+Without `-testactivationheight=blake2b@N` that height stays at `INT_MAX`, so
+a Knots chain produces only **v1 headers** — 80 bytes, SHA256d, bit 31 of
+`nVersion` clear. At v1 a Knots chain is behaviourally Bitcoin Core, and this
+node needs no changes to work against one.
+
+That is verified rather than assumed: `dln-e2e-test`'s `knots_backend`
+scenario asserts the headers are v1 and runs this binary against a Knots
+regtest chain, and `two_chains` and `lightning_swap` run it alongside a
+Core-side `dln-node`.
+
+## What changes after activation
+
+At and above the activation height, headers become **164 bytes**, flagged by
+**bit 31 of `nVersion`**, carrying three nonces, a 128-bit extranonce,
+height, txcount, flags, an XOR key and a merge-mining commitment. Proof of
+work becomes a layered BLAKE2b over those rather than SHA256d over 80 bytes.
+Test vectors live in Knots' `src/test/data/block_header_v2.json`; there is no
+BIP, and PR `bitcoinknots#359` is the specification.
+
+**That work is mostly not in this repo.** This node never parses a block
+header — `ldk-node`, `bdk` and ultimately the `bitcoin` crate do. Expect the
+change here to be `[patch]` entries pointing at header-aware forks of those
+crates, rather than node logic.
+
+One detail worth carrying: the activation block gets a one-off
+`Blake2bTargetShift` of 2²⁰. Anything validating difficulty across the switch
+must special-case it or reject the first BLAKE2b block.
+
+## Relationship to `dln-node`
+
+`upstream` points at `DarkWebDivingClub/dln-node`. Node changes are made
+there and pulled here; this fork carries only what is specific to Knots.
 
 ## Control plane
 
