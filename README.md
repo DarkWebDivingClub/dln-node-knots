@@ -4,8 +4,8 @@
 Nostr and designed to run without holding its own keys.
 
 It takes its chain data from a Bitcoin Core RPC endpoint, exposes no HTTP or
-gRPC surface, and delegates signing to a [Validating Lightning Signer][vls]
-that can live in another process — or, for tests, in-process or not at all.
+gRPC surface, and delegates signing to an external signer that can live in
+another process — or, for tests, in-process or not at all.
 
 Forked from `FlowRateHQ/eln-node` and renamed for dwdc.
 
@@ -27,24 +27,24 @@ from the grant is refused with `Restricted`.
 
 ## Signing
 
-The node never sees raw keys on the default paths. LDK's `KeysInterface` is
-backed by a VLS `KeysManagerClient`, so every signing operation is a request
-the signer validates against policy before honouring — and can refuse.
+On the default paths the node never sees raw keys. LDK's `KeysInterface` is
+backed by a signing client, so every signing operation is a request the signer
+validates against policy before honouring — and can refuse.
 
 `signer.transport` selects how:
 
 | Mode | Where keys live | Policy validation | Use |
 |---|---|---|---|
 | `nostr` | separate signer process, reached over a relay | full | production |
-| `embedded` | in-process VLS signer, `NullTransport` | two routing-balance policies downgraded to warnings | tests |
+| `embedded` | in-process signer, no transport | two routing-balance policies downgraded to warnings | tests |
 | `none` | the node itself, via ldk-node's own `KeysManager` | none | bring-up only |
 
-`embedded` also uses a `DummyPersister`, so signer state does not survive a
-restart.
+`embedded` also runs without a state persister, so signer state does not
+survive a restart.
 
-`none` bypasses VLS entirely. It exists because two nodes with embedded
-signers derive the same `node_id` and therefore cannot peer with each other,
-which makes multi-node scenarios impossible. **It is not a production
+`none` bypasses the signer entirely. It exists because two nodes running
+embedded signers derive the same `node_id` and therefore cannot peer with each
+other, which makes multi-node scenarios impossible. **It is not a production
 configuration**: the node holds its own keys, and nothing validates what it
 signs.
 
@@ -101,4 +101,3 @@ real nodes against a Bitcoin Core regtest container:
 Both currently run with `transport = "none"`.
 
 [`ldk-node`]: https://github.com/lightningdevkit/ldk-node
-[vls]: https://gitlab.com/lightning-signer/validating-lightning-signer
