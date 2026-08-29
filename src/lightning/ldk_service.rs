@@ -1,5 +1,7 @@
 use ldk_node::bitcoin::Network;
 use ldk_node::lightning::ln::channelmanager::PaymentId;
+use ldk_node::lightning::types::payment::{PaymentHash, PaymentPreimage};
+use ldk_node::bitcoin::hashes::{sha256::Hash as Sha256, Hash as _};
 use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::bitcoin::secp256k1::PublicKey;
 use ldk_node::lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescription, Description};
@@ -472,6 +474,87 @@ impl LdkService {
             .new_address()
             .map(|a| a.to_string())
             .map_err(|e| LdkServiceError::AddressGenerationFailed(e.to_string()))
+    }
+
+    /// Create a hold invoice for a payment hash the caller supplies.
+    ///
+    /// Unlike `make_invoice`, the preimage is not generated here, so the
+    /// node cannot settle the invoice on its own — `settle_hold_invoice`
+    /// must be called with the preimage, or `cancel_hold_invoice` to fail
+    /// it back. This is what lets two legs of a cross-chain swap share one
+    /// hash.
+    pub fn make_hold_invoice(
+        &self,
+        amount_msat: u64,
+        description: Option<&str>,
+        expiry_secs: Option<u64>,
+        payment_hash_hex: &str,
+    ) -> Result<LdkInvoiceResult, LdkServiceError> {
+        if amount_msat == 0 {
+            return Err(LdkServiceError::InvalidAmount(amount_msat));
+        }
+        let payment_hash = parse_payment_hash(payment_hash_hex)?;
+
+        let description_value = description.unwrap_or("nwc hold invoice").to_string();
+        let desc = Description::new(description_value)
+            .map_err(|e| LdkServiceError::InvalidInvoiceRequest(e.to_string()))?;
+        let invoice_desc = Bolt11InvoiceDescription::Direct(desc);
+        let expiry_u32 = expiry_secs
+            .map(u32::try_from)
+            .transpose()
+            .map_err(|_| {
+                LdkServiceError::InvalidInvoiceRequest("expiry exceeds u32::MAX".to_string())
+            })?
+            .unwrap_or(3600);
+
+        let invoice = self
+            .node
+            .bolt11_payment()
+            .receive_for_hash(amount_msat, &invoice_desc, expiry_u32, payment_hash)
+            .map_err(|e| LdkServiceError::InvalidInvoiceRequest(e.to_string()))?;
+
+        Ok(LdkInvoiceResult {
+            payment_hash: Some(invoice.payment_hash().to_string()),
+            amount_msat: invoice.amount_milli_satoshis(),
+            expires_at: invoice.expires_at().map(|ts| ts.as_secs()),
+            invoice: invoice.to_string(),
+        })
+    }
+
+    /// Settle a hold invoice by revealing its preimage.
+    ///
+    /// The payment hash is derived from the preimage rather than taken as a
+    /// parameter, so a caller cannot settle one invoice with another's
+    /// secret. The claimable amount is read from the pending payment.
+    pub fn settle_hold_invoice(&self, preimage_hex: &str) -> Result<(), LdkServiceError> {
+        let preimage = parse_preimage(preimage_hex)?;
+        let payment_hash = PaymentHash(Sha256::hash(&preimage.0).to_byte_array());
+
+        let details = self
+            .node
+            .payment(&PaymentId(payment_hash.0))
+            .ok_or_else(|| {
+                LdkServiceError::InvalidInvoiceRequest(
+                    "no pending payment for that preimage".to_string(),
+                )
+            })?;
+        let amount_msat = details.amount_msat.ok_or_else(|| {
+            LdkServiceError::InvalidInvoiceRequest("payment has no amount".to_string())
+        })?;
+
+        self.node
+            .bolt11_payment()
+            .claim_for_hash(payment_hash, amount_msat, preimage)
+            .map_err(|e| LdkServiceError::InvalidInvoiceRequest(e.to_string()))
+    }
+
+    /// Cancel a hold invoice, failing any held payment back to the payer.
+    pub fn cancel_hold_invoice(&self, payment_hash_hex: &str) -> Result<(), LdkServiceError> {
+        let payment_hash = parse_payment_hash(payment_hash_hex)?;
+        self.node
+            .bolt11_payment()
+            .fail_for_hash(payment_hash)
+            .map_err(|e| LdkServiceError::InvalidInvoiceRequest(e.to_string()))
     }
 
     pub fn make_invoice(
@@ -1385,4 +1468,25 @@ mod vls_keys_bridge {
             ldk_vls2_client::KeysInterface::sign_invoice_hash(&*self.inner, hash)
         }
     }
+}
+
+/// Parse a 32-byte payment hash from hex.
+fn parse_payment_hash(hex: &str) -> Result<PaymentHash, LdkServiceError> {
+    let bytes = hex_to_32(hex, "payment_hash")?;
+    Ok(PaymentHash(bytes))
+}
+
+/// Parse a 32-byte preimage from hex.
+fn parse_preimage(hex: &str) -> Result<PaymentPreimage, LdkServiceError> {
+    let bytes = hex_to_32(hex, "preimage")?;
+    Ok(PaymentPreimage(bytes))
+}
+
+fn hex_to_32(s: &str, what: &str) -> Result<[u8; 32], LdkServiceError> {
+    let raw = hex::decode(s.trim()).map_err(|e| {
+        LdkServiceError::InvalidInvoiceRequest(format!("{what} is not valid hex: {e}"))
+    })?;
+    <[u8; 32]>::try_from(raw.as_slice()).map_err(|_| {
+        LdkServiceError::InvalidInvoiceRequest(format!("{what} must be 32 bytes"))
+    })
 }

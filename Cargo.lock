@@ -870,6 +870,7 @@ name = "dln-node"
 version = "0.1.0"
 dependencies = [
  "bip321",
+ "hex",
  "ldk-node",
  "ldk-vls2-client",
  "ldk-vls2-signer",

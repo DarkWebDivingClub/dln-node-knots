@@ -10,7 +10,14 @@ use dln_node::{clear_usage_profiles, set_relay_pubkey, MethodAccessRule, UsagePr
 mod common;
 use common::{grant_usage_profile, start_relay, test_guard};
 
-/// End-to-end test: send a NWC make_hold_invoice request, expect a valid response.
+/// End-to-end test: send a NWC make_hold_invoice request and check it is
+/// routed, authorised and answered.
+///
+/// This test starts the NWC service without an LDK node, so the handler
+/// cannot create an invoice and answers with "ldk service unavailable".
+/// That is the assertion: the plumbing works. Creating a real hold invoice
+/// is covered by the `hold_invoice` scenario in dln-e2e-test, which has a
+/// funded node behind it.
 #[tokio::test]
 async fn test_nwc_make_hold_invoice_roundtrip() -> Result<()> {
     let _guard = test_guard();
@@ -68,7 +75,7 @@ async fn test_nwc_make_hold_invoice_roundtrip() -> Result<()> {
         description: None,
         description_hash: None,
         expiry: None,
-        payment_hash: "00".to_string(),
+        payment_hash: "00".repeat(32),
         min_cltv_expiry_delta: None,
     };
     let request = Request {
@@ -92,12 +99,14 @@ async fn test_nwc_make_hold_invoice_roundtrip() -> Result<()> {
                         .expect("Failed to decrypt NWC response");
 
                     assert_eq!(response.result_type, Method::MakeHoldInvoice);
-                    match response.result {
-                        Some(ResponseResult::MakeHoldInvoice(resp)) => {
-                            assert_eq!(resp.payment_hash, "00");
-                        }
-                        _ => panic!("Response was not a valid make_hold_invoice"),
-                    }
+                    let err = response
+                        .error
+                        .expect("expected an error: no LDK service is attached");
+                    assert!(
+                        err.message.contains("ldk service unavailable"),
+                        "unexpected error: {}",
+                        err.message
+                    );
                     break;
                 }
             }

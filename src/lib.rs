@@ -1384,21 +1384,47 @@ impl Handler for MakeHoldInvoiceHandler {
         })
     }
 
-    fn execute(&self, _req: &Request, _caller_pubkey: &str) -> Result<Response, NIP47Error> {
-        Ok(Response {
-            result_type: Method::MakeHoldInvoice,
-            error: None,
-            result: Some(ResponseResult::MakeHoldInvoice(MakeHoldInvoiceResponse {
-                transaction_type: TransactionType::Incoming,
-                invoice: None,
-                description: None,
-                description_hash: None,
-                payment_hash: "00".to_string(),
-                amount: 0,
-                created_at: Timestamp::now(),
-                expires_at: Timestamp::now(),
-                metadata: None,
-            })),
+    fn execute(&self, req: &Request, _caller_pubkey: &str) -> Result<Response, NIP47Error> {
+        let ldk_service = get_ldk_service().ok_or_else(|| NIP47Error {
+            code: ErrorCode::Other,
+            message: "ldk service unavailable".to_string(),
+        })?;
+
+        if let RequestParams::MakeHoldInvoice(params) = &req.params {
+            let invoice = ldk_service
+                .make_hold_invoice(
+                    params.amount,
+                    params.description.as_deref(),
+                    params.expiry,
+                    &params.payment_hash,
+                )
+                .map_err(|e| map_ldk_service_error("make_hold_invoice", ErrorCode::Other, e))?;
+
+            return Ok(Response {
+                result_type: Method::MakeHoldInvoice,
+                error: None,
+                result: Some(ResponseResult::MakeHoldInvoice(MakeHoldInvoiceResponse {
+                    transaction_type: TransactionType::Incoming,
+                    invoice: Some(invoice.invoice),
+                    description: params.description.clone(),
+                    description_hash: params.description_hash.clone(),
+                    payment_hash: invoice
+                        .payment_hash
+                        .unwrap_or_else(|| params.payment_hash.clone()),
+                    amount: invoice.amount_msat.unwrap_or(params.amount),
+                    created_at: Timestamp::now(),
+                    expires_at: invoice
+                        .expires_at
+                        .map(Timestamp::from_secs)
+                        .unwrap_or_else(Timestamp::now),
+                    metadata: None,
+                })),
+            });
+        }
+
+        Err(NIP47Error {
+            code: ErrorCode::Other,
+            message: "invalid params for make_hold_invoice".to_string(),
         })
     }
 }
@@ -1423,13 +1449,29 @@ impl Handler for CancelHoldInvoiceHandler {
         })
     }
 
-    fn execute(&self, _req: &Request, _caller_pubkey: &str) -> Result<Response, NIP47Error> {
-        Ok(Response {
-            result_type: Method::CancelHoldInvoice,
-            error: None,
-            result: Some(ResponseResult::CancelHoldInvoice(
-                CancelHoldInvoiceResponse {},
-            )),
+    fn execute(&self, req: &Request, _caller_pubkey: &str) -> Result<Response, NIP47Error> {
+        let ldk_service = get_ldk_service().ok_or_else(|| NIP47Error {
+            code: ErrorCode::Other,
+            message: "ldk service unavailable".to_string(),
+        })?;
+
+        if let RequestParams::CancelHoldInvoice(params) = &req.params {
+            ldk_service
+                .cancel_hold_invoice(&params.payment_hash)
+                .map_err(|e| map_ldk_service_error("cancel_hold_invoice", ErrorCode::Other, e))?;
+
+            return Ok(Response {
+                result_type: Method::CancelHoldInvoice,
+                error: None,
+                result: Some(ResponseResult::CancelHoldInvoice(
+                    CancelHoldInvoiceResponse {},
+                )),
+            });
+        }
+
+        Err(NIP47Error {
+            code: ErrorCode::Other,
+            message: "invalid params for cancel_hold_invoice".to_string(),
         })
     }
 }
@@ -1454,13 +1496,29 @@ impl Handler for SettleHoldInvoiceHandler {
         })
     }
 
-    fn execute(&self, _req: &Request, _caller_pubkey: &str) -> Result<Response, NIP47Error> {
-        Ok(Response {
-            result_type: Method::SettleHoldInvoice,
-            error: None,
-            result: Some(ResponseResult::SettleHoldInvoice(
-                SettleHoldInvoiceResponse {},
-            )),
+    fn execute(&self, req: &Request, _caller_pubkey: &str) -> Result<Response, NIP47Error> {
+        let ldk_service = get_ldk_service().ok_or_else(|| NIP47Error {
+            code: ErrorCode::Other,
+            message: "ldk service unavailable".to_string(),
+        })?;
+
+        if let RequestParams::SettleHoldInvoice(params) = &req.params {
+            ldk_service
+                .settle_hold_invoice(&params.preimage)
+                .map_err(|e| map_ldk_service_error("settle_hold_invoice", ErrorCode::Other, e))?;
+
+            return Ok(Response {
+                result_type: Method::SettleHoldInvoice,
+                error: None,
+                result: Some(ResponseResult::SettleHoldInvoice(
+                    SettleHoldInvoiceResponse {},
+                )),
+            });
+        }
+
+        Err(NIP47Error {
+            code: ErrorCode::Other,
+            message: "invalid params for settle_hold_invoice".to_string(),
         })
     }
 }

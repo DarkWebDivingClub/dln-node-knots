@@ -86,10 +86,14 @@ async fn test_nwc_settle_hold_invoice_roundtrip() -> Result<()> {
                         .expect("Failed to decrypt NWC response");
 
                     assert_eq!(response.result_type, Method::SettleHoldInvoice);
-                    match response.result {
-                        Some(nwc::nostr::nips::nip47::ResponseResult::SettleHoldInvoice(_)) => {}
-                        _ => panic!("Response was not a valid settle_hold_invoice"),
-                    }
+                    let err = response
+                        .error
+                        .expect("expected an error: no LDK service is attached");
+                    assert!(
+                        err.message.contains("ldk service unavailable"),
+                        "unexpected error: {}",
+                        err.message
+                    );
                     break;
                 }
             }
