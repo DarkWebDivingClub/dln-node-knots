@@ -1082,25 +1082,14 @@ impl LdkService {
 
     /// Wait for a payment to resolve.
     ///
-    /// This polls synchronously, so on a multi-threaded runtime it is run
-    /// inside `block_in_place`: Tokio then knows the worker is blocked and
-    /// can replace it, instead of losing a thread for the whole wait. That
-    /// matters because paying a hold invoice can wait a long time — the
-    /// response cannot arrive until the payee settles.
+    /// Note this polls synchronously and sleeps between attempts, so it
+    /// occupies its thread for the duration. That is tolerable today but
+    /// would not be under many concurrent held payments. Left as-is
+    /// deliberately: an earlier attempt to wrap it in `block_in_place` was
+    /// reverted because the latency it was meant to fix turned out to be a
+    /// deadlock in the test, not thread starvation. Worth revisiting with a
+    /// measurement behind it.
     fn wait_for_outbound_payment(
-        &self,
-        payment_id: PaymentId,
-    ) -> Result<LdkPaymentResult, LdkServiceError> {
-        use tokio::runtime::{Handle, RuntimeFlavor};
-        match Handle::try_current() {
-            Ok(h) if h.runtime_flavor() == RuntimeFlavor::MultiThread => {
-                tokio::task::block_in_place(|| self.poll_outbound_payment(payment_id))
-            }
-            _ => self.poll_outbound_payment(payment_id),
-        }
-    }
-
-    fn poll_outbound_payment(
         &self,
         payment_id: PaymentId,
     ) -> Result<LdkPaymentResult, LdkServiceError> {
