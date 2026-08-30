@@ -16,8 +16,8 @@ is workspace-global: one workspace cannot build both a stock node and one
 patched for BLAKE2b headers. A cross-chain swap needs both binaries running
 at the same time, so they need separate working trees.
 
-**Today it is byte-identical to `dln-node`.** That is expected, and it is the
-point of proceeding in this order.
+It began byte-identical to `dln-node`. What separates them now is the
+`[patch]` section and one feature flag — no node logic.
 
 ## Level 0
 
@@ -41,14 +41,38 @@ work becomes a layered BLAKE2b over those rather than SHA256d over 80 bytes.
 Test vectors live in Knots' `src/test/data/block_header_v2.json`; there is no
 BIP, and PR `bitcoinknots#359` is the specification.
 
-**That work is mostly not in this repo.** This node never parses a block
-header — `ldk-node`, `bdk` and ultimately the `bitcoin` crate do. Expect the
-change here to be `[patch]` entries pointing at header-aware forks of those
-crates, rather than node logic.
+**That work is not in this repo.** This node never parses a block header —
+`ldk-node`, `bdk` and ultimately the `bitcoin` crate do. What is here is the
+`[patch]` section pointing at header-aware forks, and a feature that turns
+them on.
+
+## The `blake2b` feature
+
+Off by default. With it off this builds and behaves as `dln-node` does, and
+the patched crates are drop-in replacements for the published ones. Turning
+it on enables `bitcoin/blake2b` throughout the tree:
+
+    cargo build --features blake2b
+
+Two forks are involved. `rust-bitcoin-knots` puts the v2 fields on
+`bitcoin::block::Header` and hashes them the way Knots does.
+`rust-lightning-knots` reads those fields out of the verbose
+`getblockheader` JSON, which is the only place in the tree where a header is
+built from named fields rather than from its serialization.
+
+Both are patched in, so `bdk` and `ldk-node` need no changes at all.
+
+The feature is off by default because it is not purely additive: bit 31 of
+`nVersion` was a usable version bit in Bitcoin, and Knots repurposes it as
+the header format flag, so with the feature on those bytes mean something
+else. A node built with it still follows a Core chain — that is covered by
+`bitcoin_integration`, which passes either way.
 
 One detail worth carrying: the activation block gets a one-off
-`Blake2bTargetShift` of 2²⁰. Anything validating difficulty across the switch
-must special-case it or reject the first BLAKE2b block.
+`Blake2bTargetShift` — 2²⁰ by default, but **2²² on mainnet**. Anything
+that re-derives difficulty across the switch must special-case it or reject
+the first BLAKE2b block. Nothing here re-derives it: the shift is applied
+inside `GetNextWorkRequired` and arrives already folded into `nBits`.
 
 ## Relationship to `dln-node`
 

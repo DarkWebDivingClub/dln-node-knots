@@ -18,7 +18,31 @@ ldk-vls2-client = { git = "https://gitlab.com/flowratehq/vls-signer/vls-nostr-tr
 ldk-vls2-signer = { git = "https://gitlab.com/flowratehq/vls-signer/vls-nostr-transport.git", tag = "v0.1.0" }
 lightning-signer = { git = "https://gitlab.com/flowratehq/vls-signer/validating-lightning-signer.git", tag = "v0.15.0-rc.1-flowrate.1", package = "vls-core" }
 
+# Pulled in only to turn its "blake2b" feature on; the node itself reaches
+# block-sync through ldk-node.
+lightning-block-sync = { version = "0.2", optional = true }
+
 [dev-dependencies]
 testcontainers = "0.27"
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[features]
+# Version 2 (BLAKE2b) block headers. Off by default: it enables
+# bitcoin/blake2b throughout the tree, which reads bit 31 of nVersion as a
+# header format flag rather than as part of the version number.
+blake2b = ["dep:lightning-block-sync", "lightning-block-sync/blake2b"]
+
+[patch.crates-io]
+bitcoin = { git = "https://github.com/DarkWebDivingClub/rust-bitcoin-knots.git", branch = "dwdc/blake2b-headers" }
+lightning = { git = "https://github.com/DarkWebDivingClub/rust-lightning-knots.git", branch = "dwdc/blake2b-headers" }
+lightning-types = { git = "https://github.com/DarkWebDivingClub/rust-lightning-knots.git", branch = "dwdc/blake2b-headers" }
+lightning-invoice = { git = "https://github.com/DarkWebDivingClub/rust-lightning-knots.git", branch = "dwdc/blake2b-headers" }
+lightning-macros = { git = "https://github.com/DarkWebDivingClub/rust-lightning-knots.git", branch = "dwdc/blake2b-headers" }
+possiblyrandom = { git = "https://github.com/DarkWebDivingClub/rust-lightning-knots.git", branch = "dwdc/blake2b-headers" }
+lightning-block-sync = { git = "https://github.com/DarkWebDivingClub/rust-lightning-knots.git", branch = "dwdc/blake2b-headers" }
+lightning-net-tokio = { git = "https://github.com/DarkWebDivingClub/rust-lightning-knots.git", branch = "dwdc/blake2b-headers" }
+lightning-persister = { git = "https://github.com/DarkWebDivingClub/rust-lightning-knots.git", branch = "dwdc/blake2b-headers" }
+lightning-background-processor = { git = "https://github.com/DarkWebDivingClub/rust-lightning-knots.git", branch = "dwdc/blake2b-headers" }
+lightning-rapid-gossip-sync = { git = "https://github.com/DarkWebDivingClub/rust-lightning-knots.git", branch = "dwdc/blake2b-headers" }
+lightning-liquidity = { git = "https://github.com/DarkWebDivingClub/rust-lightning-knots.git", branch = "dwdc/blake2b-headers" }

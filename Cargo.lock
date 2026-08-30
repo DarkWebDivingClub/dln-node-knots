@@ -104,7 +104,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -115,7 +115,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -420,8 +420,7 @@ checksum = "349f9b6a179ed607305526ca489b34ad0a41aed5f7980fa90eb03160b69598fb"
 [[package]]
 name = "bitcoin"
 version = "0.32.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e499f9fc0407f50fe98af744ab44fa67d409f76b6772e1689ec8485eb0c0f66"
+source = "git+https://github.com/DarkWebDivingClub/rust-bitcoin-knots.git?branch=dwdc%2Fblake2b-headers#fe2cb9d1318f76558cd3bc07b7ff448338900c50"
 dependencies = [
  "base58ck",
  "base64 0.21.7",
@@ -431,6 +430,7 @@ dependencies = [
  "bitcoin-units",
  "bitcoin_hashes",
  "bitcoinconsensus",
+ "blake2",
  "hex-conservative",
  "hex_lit",
  "secp256k1",
@@ -509,6 +509,15 @@ name = "bitflags"
 version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4512299f36f043ab09a583e57bceb5a5aab7a73db1805848e8fef3c9e8c78b3"
+
+[[package]]
+name = "blake2"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46502ad458c9a52b69d4d4d32775c788b7a1b85e8bc9d482d92250fc0e3f8efe"
+dependencies = [
+ "digest",
+]
 
 [[package]]
 name = "block-buffer"
@@ -874,6 +883,7 @@ dependencies = [
  "ldk-node",
  "ldk-vls2-client",
  "ldk-vls2-signer",
+ "lightning-block-sync",
  "nostr-sdk",
  "nwc",
  "reqwest",
@@ -968,7 +978,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1900,8 +1910,7 @@ dependencies = [
 [[package]]
 name = "lightning"
 version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c90397b635e3ece6b9a723fb470a46cb9b3592f217d72e40540a5fada00289d"
+source = "git+https://github.com/DarkWebDivingClub/rust-lightning-knots.git?branch=dwdc%2Fblake2b-headers#b297dcc352abdb68b89a630ee46b4e1811363e3b"
 dependencies = [
  "bech32",
  "bitcoin",
@@ -1911,6 +1920,7 @@ dependencies = [
  "lightning-invoice 0.34.0",
  "lightning-macros",
  "lightning-types 0.3.1",
+ "musig2",
  "possiblyrandom",
  "regex",
 ]
@@ -1918,8 +1928,7 @@ dependencies = [
 [[package]]
 name = "lightning-background-processor"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abdc5450264184deba88b1dc61fa8d2ca905e21748bad556915757ac73d91103"
+source = "git+https://github.com/DarkWebDivingClub/rust-lightning-knots.git?branch=dwdc%2Fblake2b-headers#b297dcc352abdb68b89a630ee46b4e1811363e3b"
 dependencies = [
  "bitcoin",
  "bitcoin-io",
@@ -1933,8 +1942,7 @@ dependencies = [
 [[package]]
 name = "lightning-block-sync"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee5069846b07a62aaecdaf25233e067bc69f245b7c8fd00cc9c217053221f875"
+source = "git+https://github.com/DarkWebDivingClub/rust-lightning-knots.git?branch=dwdc%2Fblake2b-headers#b297dcc352abdb68b89a630ee46b4e1811363e3b"
 dependencies = [
  "bitcoin",
  "chunked_transfer",
@@ -1957,8 +1965,7 @@ dependencies = [
 [[package]]
 name = "lightning-invoice"
 version = "0.34.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b85e5e14bcdb30d746e9785b04f27938292e8944f78f26517e01e91691f6b3f2"
+source = "git+https://github.com/DarkWebDivingClub/rust-lightning-knots.git?branch=dwdc%2Fblake2b-headers#b297dcc352abdb68b89a630ee46b4e1811363e3b"
 dependencies = [
  "bech32",
  "bitcoin",
@@ -1969,8 +1976,7 @@ dependencies = [
 [[package]]
 name = "lightning-liquidity"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58a6480d4d7726c49b4cd170b18a39563bbe897d0b8960be11d5e4a0cebd43b0"
+source = "git+https://github.com/DarkWebDivingClub/rust-lightning-knots.git?branch=dwdc%2Fblake2b-headers#b297dcc352abdb68b89a630ee46b4e1811363e3b"
 dependencies = [
  "bitcoin",
  "chrono",
@@ -1985,8 +1991,7 @@ dependencies = [
 [[package]]
 name = "lightning-macros"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4c717494cdc2c8bb85bee7113031248f5f6c64f8802b33c1c9e2d98e594aa71"
+source = "git+https://github.com/DarkWebDivingClub/rust-lightning-knots.git?branch=dwdc%2Fblake2b-headers#b297dcc352abdb68b89a630ee46b4e1811363e3b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1996,8 +2001,7 @@ dependencies = [
 [[package]]
 name = "lightning-net-tokio"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8055737e3d2d06240a3fdf10e26b2716110fcea90011a0839e8e82fc6e58ff5e"
+source = "git+https://github.com/DarkWebDivingClub/rust-lightning-knots.git?branch=dwdc%2Fblake2b-headers#b297dcc352abdb68b89a630ee46b4e1811363e3b"
 dependencies = [
  "bitcoin",
  "lightning 0.2.2",
@@ -2007,8 +2011,7 @@ dependencies = [
 [[package]]
 name = "lightning-persister"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6d78990de56ca75c5535c3f8e6f86b183a1aa8f521eb32afb9e8181f3bd91d7"
+source = "git+https://github.com/DarkWebDivingClub/rust-lightning-knots.git?branch=dwdc%2Fblake2b-headers#b297dcc352abdb68b89a630ee46b4e1811363e3b"
 dependencies = [
  "bitcoin",
  "lightning 0.2.2",
@@ -2019,8 +2022,7 @@ dependencies = [
 [[package]]
 name = "lightning-rapid-gossip-sync"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b094f79f22713aa95194a166c77b2f6c7d68f9d76622a43552a29b8fe6fa92d0"
+source = "git+https://github.com/DarkWebDivingClub/rust-lightning-knots.git?branch=dwdc%2Fblake2b-headers#b297dcc352abdb68b89a630ee46b4e1811363e3b"
 dependencies = [
  "bitcoin",
  "bitcoin-io",
@@ -2054,8 +2056,7 @@ dependencies = [
 [[package]]
 name = "lightning-types"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb1aac93f22f2c2eac8a0ee83bb1a1ea58673caa2c82847302710b83364d04e6"
+source = "git+https://github.com/DarkWebDivingClub/rust-lightning-knots.git?branch=dwdc%2Fblake2b-headers#b297dcc352abdb68b89a630ee46b4e1811363e3b"
 dependencies = [
  "bitcoin",
 ]
@@ -2161,6 +2162,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
 
 [[package]]
+name = "musig2"
+version = "0.1.0"
+source = "git+https://github.com/arik-so/rust-musig2?rev=6f95a05718cbb44d8fe3fa6021aea8117aa38d50#6f95a05718cbb44d8fe3fa6021aea8117aa38d50"
+dependencies = [
+ "bitcoin",
+]
+
+[[package]]
 name = "negentropy"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2235,7 +2244,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2495,8 +2504,7 @@ dependencies = [
 [[package]]
 name = "possiblyrandom"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b122a615d72104fb3d8b26523fdf9232cd8ee06949fb37e4ce3ff964d15dffd"
+source = "git+https://github.com/DarkWebDivingClub/rust-lightning-knots.git?branch=dwdc%2Fblake2b-headers#b297dcc352abdb68b89a630ee46b4e1811363e3b"
 dependencies = [
  "getrandom 0.2.17",
 ]
@@ -2971,7 +2979,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3328,7 +3336,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3424,7 +3432,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
