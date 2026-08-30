@@ -193,6 +193,12 @@ pub struct LdkChannelInfo {
     pub funding_txid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub funding_output_index: Option<u32>,
+    /// Confirmations the node has counted on the funding transaction.
+    ///
+    /// The node's own count, not the chain's: it is what decides when a
+    /// channel becomes ready, so it is worth being able to see directly.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confirmations: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -747,6 +753,7 @@ impl LdkService {
                     capacity: channel.channel_value_sats * 1000,
                     funding_txid,
                     funding_output_index,
+                    confirmations: channel.confirmations,
                 }
             })
             .collect()
