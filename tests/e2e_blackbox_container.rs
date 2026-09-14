@@ -12,7 +12,6 @@ use std::os::unix::fs::PermissionsExt;
 
 use common::{start_relay, test_guard};
 use dln_node::lightning::{LdkService, LdkServiceConfig};
-use dln_node::{MethodAccessRule, UsageProfile};
 use nostr_sdk::prelude::*;
 use nwc::nostr::nips::nip04;
 use nwc::nostr::nips::nip47::{
@@ -75,12 +74,25 @@ fn ensure_image_built() {
     });
 }
 
+/// Write the node's `config.toml`.
+///
+/// `owners` is **required configuration since 25.3**: an empty list
+/// accepts no grants and the node answers nothing. The old code kept an
+/// OWNERS list that nothing ever wrote to and applied every grant it saw,
+/// which is dln-node#1 — so a test that does not name an owner is now
+/// testing a node that correctly refuses everything.
 fn write_config(
     relay_url: &str,
     dir: &PathBuf,
     private_key: &str,
+    owners: &[PublicKey],
     bitcoind: Option<(&str, u16, &str, &str)>,
 ) {
+    let owners_toml = owners
+        .iter()
+        .map(|o| format!("\"{}\"", o.to_hex()))
+        .collect::<Vec<_>>()
+        .join(", ");
     let mut config = format!(
         r#"[node]
 network = "regtest"
@@ -90,6 +102,7 @@ data_dir = "/var/lib/dln-node/data"
 [nostr]
 relay = "{relay_url}"
 private_key = "{private_key}"
+owners = [{owners_toml}]
 
 [wallet]
 max_channel_size_sats = 1000000
@@ -272,7 +285,7 @@ async fn send_control_request_and_wait_response(
     let mut notifications = controller.notifications();
     let encrypted = nip04::encrypt(controller_secret, &service_pubkey, payload_text.clone())
         .expect("failed to encrypt control request");
-    let request_event = EventBuilder::new(Kind::Custom(dln_node::CONTROL_REQUEST_KIND), encrypted)
+    let request_event = EventBuilder::new(Kind::Custom(nostr_ln::service::CONTROL_REQUEST_KIND), encrypted)
         .tag(Tag::public_key(service_pubkey));
     controller
         .send_event_builder(request_event)
@@ -284,7 +297,7 @@ async fn send_control_request_and_wait_response(
         while let Some(notification) = notifications.next().await {
             if let ClientNotification::Event { event, .. } = notification {
                 let event = event.as_ref();
-                if event.kind == Kind::Custom(dln_node::CONTROL_RESPONSE_KIND)
+                if event.kind == Kind::Custom(nostr_ln::service::CONTROL_RESPONSE_KIND)
                     && event.pubkey == service_pubkey
                 {
                     let decrypted = nip04::decrypt(controller_secret, &service_pubkey, &event.content)
@@ -327,7 +340,7 @@ async fn e2e_container_stack_boots() {
 
     let relay_ws = relay_url.replace("ws://localhost:", "ws://host.docker.internal:");
     let config_dir = PathBuf::from(format!("/tmp/{}", unique_id("dln-node-config")));
-    write_config(&relay_ws, &config_dir, "invalid-for-tests", None);
+    write_config(&relay_ws, &config_dir, "invalid-for-tests", &[], None);
 
     let controller = start_controller_container(&config_dir, None, false);
     wait_for_controller_ready(&controller.name);
@@ -352,7 +365,8 @@ async fn e2e_nwc_get_info_get_balance_roundtrip() -> Result<()> {
 
     let relay_ws_for_container = relay_url.replace("ws://localhost:", "ws://host.docker.internal:");
     let config_dir = PathBuf::from(format!("/tmp/{}", unique_id("dln-node-config")));
-    write_config(&relay_ws_for_container, &config_dir, &service_secret, None);
+    let owner_keys = Keys::generate();
+    write_config(&relay_ws_for_container, &config_dir, &service_secret, &[owner_keys.public_key()], None);
 
     let controller = start_controller_container(&config_dir, None, false);
     wait_for_controller_ready(&controller.name);
@@ -361,18 +375,13 @@ async fn e2e_nwc_get_info_get_balance_roundtrip() -> Result<()> {
     let client_keys = Keys::new(client_secret.clone());
     let client_pubkey = client_keys.public_key();
 
-    let owner_keys = Keys::generate();
-    let usage_profile = UsageProfile {
-        quota: None,
-        methods: None,
-        control: None,
-    };
+    let usage_profile = r#"{"methods":{"OTHERS":{}},"control":{"OTHERS":{}}}"#;
     common::grant_usage_profile(
         &owner_keys,
         &relay_url,
         service_pubkey,
         client_pubkey,
-        &usage_profile,
+        usage_profile,
     )
     .await?;
 
@@ -454,7 +463,8 @@ async fn e2e_grant_authorization_enforced() -> Result<()> {
 
     let relay_ws_for_container = relay_url.replace("ws://localhost:", "ws://host.docker.internal:");
     let config_dir = PathBuf::from(format!("/tmp/{}", unique_id("dln-node-config")));
-    write_config(&relay_ws_for_container, &config_dir, &service_secret, None);
+    let owner_keys = Keys::generate();
+    write_config(&relay_ws_for_container, &config_dir, &service_secret, &[owner_keys.public_key()], None);
 
     let controller = start_controller_container(&config_dir, None, false);
     wait_for_controller_ready(&controller.name);
@@ -478,21 +488,9 @@ async fn e2e_grant_authorization_enforced() -> Result<()> {
     let relay = RelayUrl::parse(&relay_url)?;
     let uri = NostrWalletConnectUri::new(service_pubkey, vec![relay], client_secret, None);
 
-    let mut allowed_methods: HashMap<Method, MethodAccessRule> = HashMap::new();
-    allowed_methods.insert(
-        Method::GetInfo,
-        MethodAccessRule {
-            access_rate: None,
-        },
-    );
-    let usage_profile = UsageProfile {
-        quota: None,
-        methods: Some(allowed_methods),
-        control: None,
-    };
+    let usage_profile = r#"{"methods":{"get_info":{}}}"#;
 
     // Old d-tag format should not apply any grant.
-    let owner_keys = Keys::generate();
     let owner_client = Client::builder().signer(owner_keys.clone()).build();
     owner_client.add_relay(&relay_url).await?;
     owner_client.connect().await;
@@ -525,7 +523,7 @@ async fn e2e_grant_authorization_enforced() -> Result<()> {
         &relay_url,
         service_pubkey,
         client_pubkey,
-        &usage_profile,
+        usage_profile,
     )
     .await?;
     tokio::time::sleep(Duration::from_secs(2)).await;
@@ -579,7 +577,8 @@ async fn e2e_control_list_channels_roundtrip() -> Result<()> {
 
     let relay_ws_for_container = relay_url.replace("ws://localhost:", "ws://host.docker.internal:");
     let config_dir = PathBuf::from(format!("/tmp/{}", unique_id("dln-node-config")));
-    write_config(&relay_ws_for_container, &config_dir, &service_secret, None);
+    let owner_keys = Keys::generate();
+    write_config(&relay_ws_for_container, &config_dir, &service_secret, &[owner_keys.public_key()], None);
 
     let controller_container = start_controller_container(&config_dir, None, false);
     wait_for_controller_ready(&controller_container.name);
@@ -588,25 +587,13 @@ async fn e2e_control_list_channels_roundtrip() -> Result<()> {
     let controller_secret = controller_keys.secret_key().clone();
     let controller_pubkey = controller_keys.public_key();
 
-    let mut control = HashMap::new();
-    control.insert(
-        "list_channels".to_string(),
-        MethodAccessRule {
-            access_rate: None,
-        },
-    );
-    let profile = UsageProfile {
-        quota: None,
-        methods: None,
-        control: Some(control),
-    };
-    let owner_keys = Keys::generate();
+    let profile = r#"{"control":{"list_channels":{}}}"#;
     common::grant_usage_profile(
         &owner_keys,
         &relay_url,
         service_pubkey,
         controller_pubkey,
-        &profile,
+        profile,
     )
     .await?;
 
@@ -617,7 +604,7 @@ async fn e2e_control_list_channels_roundtrip() -> Result<()> {
     controller_client
         .subscribe(
             Filter::new()
-                .kind(Kind::Custom(dln_node::CONTROL_RESPONSE_KIND))
+                .kind(Kind::Custom(nostr_ln::service::CONTROL_RESPONSE_KIND))
                 .author(service_pubkey),
         )
         .await?;
@@ -668,10 +655,14 @@ async fn e2e_control_open_channel_and_bidirectional_payment() -> Result<()> {
     let relay_ws_for_container = relay_url.clone();
     let config_dir = PathBuf::from(format!("/tmp/{}", unique_id("dln-node-config")));
     let alice_listen_port = 9735u16;
+    // The owner must exist before the config names it: the node
+    // accepts grants from these keys and no others.
+    let owner_keys = Keys::generate();
     write_config(
         &relay_ws_for_container,
         &config_dir,
         &service_secret,
+        &[owner_keys.public_key()],
         Some((
             "127.0.0.1",
             bitcoind.rpc_port(),
@@ -686,20 +677,7 @@ async fn e2e_control_open_channel_and_bidirectional_payment() -> Result<()> {
     let controller_secret = controller_keys.secret_key().clone();
     let controller_pubkey = controller_keys.public_key();
 
-    let mut methods = HashMap::new();
-    methods.insert(Method::GetInfo, MethodAccessRule { access_rate: None });
-    methods.insert(Method::GetBalance, MethodAccessRule { access_rate: None });
-    methods.insert(Method::MakeInvoice, MethodAccessRule { access_rate: None });
-    methods.insert(Method::PayInvoice, MethodAccessRule { access_rate: None });
-    methods.insert(Method::PayKeysend, MethodAccessRule { access_rate: None });
-    let mut control = HashMap::new();
-    control.insert("list_channels".to_string(), MethodAccessRule { access_rate: None });
-    control.insert("connect_peer".to_string(), MethodAccessRule { access_rate: None });
-    let usage_profile = UsageProfile {
-        quota: None,
-        methods: Some(methods),
-        control: Some(control),
-    };
+    let usage_profile = r#"{"methods":{"OTHERS":{}},"control":{"list_channels":{},"connect_peer":{}}}"#;
 
     let owner_keys = Keys::generate();
     common::grant_usage_profile(
@@ -707,7 +685,7 @@ async fn e2e_control_open_channel_and_bidirectional_payment() -> Result<()> {
         &relay_url,
         service_pubkey,
         controller_pubkey,
-        &usage_profile,
+        usage_profile,
     )
     .await?;
 
@@ -725,7 +703,7 @@ async fn e2e_control_open_channel_and_bidirectional_payment() -> Result<()> {
     nwc_client
         .subscribe(
             Filter::new()
-                .kind(Kind::Custom(dln_node::CONTROL_RESPONSE_KIND))
+                .kind(Kind::Custom(nostr_ln::service::CONTROL_RESPONSE_KIND))
                 .author(service_pubkey),
         )
         .await?;
@@ -933,10 +911,14 @@ async fn e2e_control_alice_opens_channel_and_bidirectional_payment() -> Result<(
 
     let relay_ws_for_container = relay_url.clone();
     let config_dir = PathBuf::from(format!("/tmp/{}", unique_id("dln-node-config")));
+    // The owner must exist before the config names it: the node
+    // accepts grants from these keys and no others.
+    let owner_keys = Keys::generate();
     write_config(
         &relay_ws_for_container,
         &config_dir,
         &service_secret,
+        &[owner_keys.public_key()],
         Some((
             "127.0.0.1",
             bitcoind.rpc_port(),
@@ -968,22 +950,7 @@ async fn e2e_control_alice_opens_channel_and_bidirectional_payment() -> Result<(
     let controller_secret = controller_keys.secret_key().clone();
     let controller_pubkey = controller_keys.public_key();
 
-    let mut methods = HashMap::new();
-    methods.insert(Method::GetInfo, MethodAccessRule { access_rate: None });
-    methods.insert(Method::GetBalance, MethodAccessRule { access_rate: None });
-    methods.insert(Method::MakeInvoice, MethodAccessRule { access_rate: None });
-    methods.insert(Method::PayInvoice, MethodAccessRule { access_rate: None });
-
-    let mut control = HashMap::new();
-    control.insert("open_channel".to_string(), MethodAccessRule { access_rate: None });
-    control.insert("list_channels".to_string(), MethodAccessRule { access_rate: None });
-    control.insert("connect_peer".to_string(), MethodAccessRule { access_rate: None });
-
-    let usage_profile = UsageProfile {
-        quota: None,
-        methods: Some(methods),
-        control: Some(control),
-    };
+    let usage_profile = r#"{"methods":{"OTHERS":{}},"control":{"open_channel":{},"list_channels":{},"connect_peer":{}}}"#;
 
     let owner_keys = Keys::generate();
     common::grant_usage_profile(
@@ -991,7 +958,7 @@ async fn e2e_control_alice_opens_channel_and_bidirectional_payment() -> Result<(
         &relay_url,
         service_pubkey,
         controller_pubkey,
-        &usage_profile,
+        usage_profile,
     )
     .await?;
 
@@ -1009,7 +976,7 @@ async fn e2e_control_alice_opens_channel_and_bidirectional_payment() -> Result<(
     nwc_client
         .subscribe(
             Filter::new()
-                .kind(Kind::Custom(dln_node::CONTROL_RESPONSE_KIND))
+                .kind(Kind::Custom(nostr_ln::service::CONTROL_RESPONSE_KIND))
                 .author(service_pubkey),
         )
         .await?;

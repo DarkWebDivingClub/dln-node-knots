@@ -1,4 +1,3 @@
-use dln_node::UsageProfile;
 use nostr_sdk::prelude::*;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -42,15 +41,25 @@ pub fn test_guard() -> std::sync::MutexGuard<'static, ()> {
         .expect("test lock poisoned")
 }
 
+/// Publish a grant, signed by the owner.
+///
+/// Takes the profile as **JSON text** rather than a type. `dln-node` no
+/// longer defines one: the profile belongs to `nostr-ln`, and a helper
+/// that constructed the node's own type is how this harness came to write
+/// `access_rate` — [dln-node#2](https://github.com/DarkWebDivingClub/dln-node/issues/2)
+/// — and to keep asserting it for months.
+///
+/// Text means a test writes what a conforming issuer would write, and the
+/// node either accepts it or does not.
 #[allow(dead_code)]
 pub async fn grant_usage_profile(
     owner_keys: &Keys,
     relay_url: &str,
     node_pubkey: PublicKey,
     target_pubkey: PublicKey,
-    profile: &UsageProfile,
+    profile: &str,
 ) -> Result<()> {
-    let content = serde_json::to_string(profile).expect("serialize UsageProfile");
+    let content = profile.to_string();
     let d_value = format!("{}:{}", node_pubkey, target_pubkey);
 
     let owner_client = Client::builder().signer(owner_keys.clone()).build();
@@ -58,7 +67,10 @@ pub async fn grant_usage_profile(
     owner_client.connect().await;
     tokio::time::sleep(Duration::from_secs(1)).await;
 
-    let grant_event = EventBuilder::new(Kind::Custom(30078), content)
+    // The kind is the crate's constant, not a number this harness
+    // remembers. A test harness with its own copy of a protocol detail is
+    // the same defect one level down.
+    let grant_event = EventBuilder::new(Kind::Custom(nostr_ln::GRANT_KIND), content)
         .tag(Tag::parse(["d", d_value.as_str()]).expect("create d tag"))
         .tag(Tag::public_key(node_pubkey));
     owner_client.send_event_builder(grant_event).await?;

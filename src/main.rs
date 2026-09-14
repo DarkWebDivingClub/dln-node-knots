@@ -27,6 +27,11 @@ struct NodeConfig {
 struct NostrConfig {
     relay: String,
     private_key: String,
+    /// Whose grants this node accepts. **Required, and an empty list
+    /// answers nothing** — absent configuration fails closed rather than
+    /// being read as "any owner", which is dln-node#1.
+    #[serde(default)]
+    owners: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -91,57 +96,63 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Start NWC service; if bitcoind config is present, attach an LDK backend.
-    let _ldk_service: Option<Arc<LdkService>>;
-    let client = if let Some(bitcoind) = &config.bitcoind {
-        let signer_transport = config
-            .signer
-            .as_ref()
-            .map(|s| s.transport.as_str())
-            .unwrap_or("embedded");
-        let signer_relay = config
-            .signer
-            .as_ref()
-            .and_then(|s| s.relay.clone());
-        let signer_nsec = config
-            .signer
-            .as_ref()
-            .and_then(|s| s.nsec.clone());
-        let signer_pubkey = config
-            .signer
-            .as_ref()
-            .and_then(|s| s.signer_pubkey.clone());
+    let owners: Vec<nostr_sdk::prelude::PublicKey> = config
+        .nostr
+        .owners
+        .iter()
+        .map(|o| {
+            nostr_sdk::prelude::PublicKey::parse(o)
+                .unwrap_or_else(|e| panic!("nostr.owners: {o} is not a public key: {e}"))
+        })
+        .collect();
+    if owners.is_empty() {
+        eprintln!(
+            "nostr.owners is empty: this node will accept no grants and \
+             answer nothing. Set it to the owner's public key."
+        );
+    }
+    println!("  Owners:         {}", owners.len());
 
-        let ldk_cfg = LdkServiceConfig {
-            network: config.node.network.clone(),
-            bitcoind_rpc_host: bitcoind.rpc_host.clone(),
-            bitcoind_rpc_port: bitcoind.rpc_port,
-            bitcoind_rpc_user: bitcoind.rpc_user.clone(),
-            bitcoind_rpc_password: bitcoind.rpc_password.clone(),
-            ldk_storage_dir: config.node.data_dir.clone(),
-            ldk_listen_addr: Some(format!("0.0.0.0:{}", config.node.listening_port)),
-            node_alias: config.node.alias.clone(),
-            signer_transport: signer_transport.to_string(),
-            signer_relay,
-            signer_nsec,
-            signer_pubkey,
-        };
-        let ldk_service =
-            LdkService::start_from_config(&ldk_cfg).expect("Failed to start LDK service");
-        _ldk_service = Some(ldk_service.clone());
-        dln_node::run_nwc_service_with_ldk(keys, &config.nostr.relay, ldk_service, config.node.alias).await?
-    } else {
-        _ldk_service = None;
-        dln_node::run_nwc_service(keys, &config.nostr.relay).await?
+    let bitcoind = config.bitcoind.as_ref().expect(
+        "bitcoind configuration is required: this node serves a Lightning \
+         node and has nothing to answer with when there is none",
+    );
+    let signer_transport = config
+        .signer
+        .as_ref()
+        .map(|s| s.transport.as_str())
+        .unwrap_or("embedded");
+    let ldk_cfg = LdkServiceConfig {
+        network: config.node.network.clone(),
+        bitcoind_rpc_host: bitcoind.rpc_host.clone(),
+        bitcoind_rpc_port: bitcoind.rpc_port,
+        bitcoind_rpc_user: bitcoind.rpc_user.clone(),
+        bitcoind_rpc_password: bitcoind.rpc_password.clone(),
+        ldk_storage_dir: config.node.data_dir.clone(),
+        ldk_listen_addr: Some(format!("0.0.0.0:{}", config.node.listening_port)),
+        node_alias: config.node.alias.clone(),
+        signer_transport: signer_transport.to_string(),
+        signer_relay: config.signer.as_ref().and_then(|s| s.relay.clone()),
+        signer_nsec: config.signer.as_ref().and_then(|s| s.nsec.clone()),
+        signer_pubkey: config.signer.as_ref().and_then(|s| s.signer_pubkey.clone()),
     };
+    let ldk = LdkService::start_from_config(&ldk_cfg).expect("Failed to start LDK service");
 
-    // Keep the main function alive so the background notification handler
-    // continues running. Ctrl+C to stop.
-    println!("Press Ctrl+C to stop.\n");
-    tokio::signal::ctrl_c()
-        .await
-        .expect("Failed to listen for Ctrl+C");
-    client.disconnect().await;
+    println!("Serving. Press Ctrl+C to stop.\n");
+    let service = dln_node::service::run(
+        dln_node::service::NodeConfig {
+            keys,
+            relays: vec![config.nostr.relay.clone()],
+            owners,
+            alias: config.node.alias.clone(),
+        },
+        ldk,
+    );
+
+    tokio::select! {
+        r = service => r.expect("service stopped"),
+        _ = tokio::signal::ctrl_c() => println!("stopping"),
+    }
 
     Ok(())
 }
