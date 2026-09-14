@@ -93,7 +93,23 @@ impl ControlService for Control {
                         local_balance: Some(c.local_balance),
                         remote_balance: Some(c.remote_balance),
                         funding_txid: c.funding_txid,
-                        extra: Default::default(),
+                        // What NIP-XX does not name and this node knows.
+                        // `extra` is flattened, so these appear at the top
+                        // level exactly as they did before the migration —
+                        // which is what `dln-node-knots-e2e-test`'s
+                        // activation scenario reads to tell whether the
+                        // funding transaction is still being counted from
+                        // the same block across the v1→v2 boundary.
+                        extra: {
+                            let mut m = serde_json::Map::new();
+                            if let Some(n) = c.confirmations {
+                                m.insert("confirmations".into(), n.into());
+                            }
+                            if let Some(i) = c.funding_output_index {
+                                m.insert("funding_output_index".into(), i.into());
+                            }
+                            m
+                        },
                     })
                     .collect(),
             })
