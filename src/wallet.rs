@@ -17,6 +17,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use ldk_node::lightning::offers::offer::Offer;
+use nwc::nostr::hashes::{sha256, Hash};
 use nostr_ln::nnc::{ErrorCode, NncError};
 use nostr_ln::nwc::methods::*;
 use nostr_ln::service::handler::Fut;
@@ -656,13 +657,20 @@ impl WalletService for Wallet {
 
     // ── nwc-bip321.md ────────────────────────────────────────────────
 
-    fn pay_bip321<'a>(&'a self, r: PayBip321Request, _c: Caller<'a>)
-        -> Fut<'a, Result<PayBip321Response, NncError>>
+    fn pay<'a>(&'a self, r: PayRequest, _c: Caller<'a>)
+        -> Fut<'a, Result<PayResponse, NncError>>
     {
         Box::pin(async move {
-            let uri = bip321::Uri::parse(&r.uri)
+            let uri = bip321::Uri::parse(&r.payment)
                 .map_err(|e| NncError::new(ErrorCode::BadRequest, format!("bip321: {e}")))?;
-            let amount_msat = uri.amount.map(|a| a.to_sat() * 1_000);
+            let amount_msat = r.amount.or_else(|| uri.amount.map(|a| a.to_sat() * 1_000));
+
+            // NWC-321: a wallet honouring max_fee MUST return fees_paid,
+            // and one that does not MUST ignore the parameter. This node
+            // cannot cap a route, so it ignores it — and therefore must
+            // not pretend otherwise. `fees_paid` is still reported; what
+            // it must not do is claim the budget was enforced.
+            let _ = &r.max_fee;
 
             // Lightning first: the payer usually cares more about
             // settlement speed than the payee's ordering.
@@ -670,28 +678,20 @@ impl WalletService for Wallet {
                 let p = self
                     .ldk
                     .pay_invoice(invoice.as_str(), amount_msat)
-                    .map_err(|e| ldk_err("pay_bip321/bolt11", ErrorCode::PaymentFailed, e))?;
-                return Ok(PayBip321Response {
-                    payment_method: "bolt11".into(),
-                    preimage: Some(p.preimage),
-                    txid: None,
-                    fees_paid: p.fees_paid_msat,
-                });
+                    .map_err(|e| ldk_err("pay/bolt11", ErrorCode::PaymentFailed, e))?;
+                return Ok(paid("bolt11", amount_msat.unwrap_or(0), Some(p.preimage), None,
+                               p.fees_paid_msat.unwrap_or(0)));
             }
             if let Some(offer) = uri.lno.first() {
                 let p = self
                     .ldk
-                    .pay_offer(offer.as_str(), amount_msat, None)
-                    .map_err(|e| ldk_err("pay_bip321/bolt12", ErrorCode::PaymentFailed, e))?;
-                return Ok(PayBip321Response {
-                    payment_method: "bolt12".into(),
-                    preimage: Some(p.preimage),
-                    txid: None,
-                    fees_paid: p.fees_paid_msat,
-                });
+                    .pay_offer(offer.as_str(), amount_msat, r.payer_note.clone())
+                    .map_err(|e| ldk_err("pay/bolt12", ErrorCode::PaymentFailed, e))?;
+                return Ok(paid("bolt12", amount_msat.unwrap_or(0), Some(p.preimage), None,
+                               p.fees_paid_msat.unwrap_or(0)));
             }
             if uri.address.is_some() {
-                let amount_sat = uri.amount.map(|a| a.to_sat()).ok_or_else(|| {
+                let amount_sat = amount_msat.map(|m| m / 1_000).ok_or_else(|| {
                     NncError::new(ErrorCode::BadRequest, "an on-chain payment needs an amount")
                 })?;
                 let addr = uri.address_str().ok_or_else(|| {
@@ -700,23 +700,20 @@ impl WalletService for Wallet {
                 let txid = self
                     .ldk
                     .pay_onchain(addr, amount_sat, None)
-                    .map_err(|e| ldk_err("pay_bip321/onchain", ErrorCode::PaymentFailed, e))?;
-                return Ok(PayBip321Response {
-                    payment_method: "onchain".into(),
-                    preimage: None,
-                    txid: Some(txid),
-                    fees_paid: None,
-                });
+                    .map_err(|e| ldk_err("pay/onchain", ErrorCode::PaymentFailed, e))?;
+                // `onchain` is nwc-bip321.md's, not NWC-321's, and this
+                // node declares that extension in bip321_methods.
+                return Ok(paid("onchain", amount_sat * 1_000, None, Some(txid), 0));
             }
             Err(NncError::new(
-                ErrorCode::BadRequest,
+                ErrorCode::UnsupportedPaymentInstruction,
                 "no instruction in this URI is one this node can pay",
             ))
         })
     }
 
-    fn make_bip321<'a>(&'a self, r: MakeBip321Request, _c: Caller<'a>)
-        -> Fut<'a, Result<MakeBip321Response, NncError>>
+    fn receive<'a>(&'a self, r: ReceiveRequest, _c: Caller<'a>)
+        -> Fut<'a, Result<ReceiveResponse, NncError>>
     {
         Box::pin(async move {
             let mut uri: bip321::Uri<'_> = bip321::Uri::new();
@@ -727,8 +724,8 @@ impl WalletService for Wallet {
                 // Names the payee, and belongs only in the URI.
                 uri.label = Some(bip321::Param::from_decoded(label.clone()));
             }
-            if let Some(message) = &r.message {
-                uri.message = Some(bip321::Param::from_decoded(message.clone()));
+            if let Some(description) = &r.description {
+                uri.message = Some(bip321::Param::from_decoded(description.clone()));
             }
 
             let default = vec![
@@ -748,7 +745,7 @@ impl WalletService for Wallet {
                         let Some(amount) = r.amount else { continue };
                         match self.ldk.make_invoice(
                             amount,
-                            r.message.as_deref(),
+                            r.description.as_deref(),
                             None,
                             entry.expiry,
                         ) {
@@ -760,7 +757,7 @@ impl WalletService for Wallet {
                         }
                     }
                     "bolt12" => {
-                        let desc = r.message.as_deref().unwrap_or("bip321 offer");
+                        let desc = r.description.as_deref().unwrap_or("bip321 offer");
                         let expiry = entry.expiry.and_then(|e| u32::try_from(e).ok());
                         match self.ldk.make_offer(r.amount.unwrap_or(0), desc, expiry) {
                             Ok(offer) => {
@@ -803,7 +800,7 @@ impl WalletService for Wallet {
                     "no payment instruction could be generated",
                 ));
             }
-            Ok(MakeBip321Response { uri: format!("{uri}") })
+            Ok(ReceiveResponse { bip321: format!("{uri}"), transaction_id: None })
         })
     }
 
@@ -818,4 +815,54 @@ fn now() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// A completed `pay`, as NWC-321's response.
+///
+/// This node settles synchronously, so `state` is always `settled` and
+/// `settled_at` is always present — a `pending` here would be a claim it
+/// cannot make good.
+fn paid(
+    instruction_type: &str,
+    amount: u64,
+    preimage: Option<String>,
+    txid: Option<String>,
+    fees_paid: u64,
+) -> PayResponse {
+    // **The hash, never the preimage.** The preimage proves the payment
+    // and is the one value that must not travel as an identifier —
+    // `transaction_id` is for correlation and a client may log it, quote
+    // it back, or hand it to something else. The hash is what it is for.
+    let hash = preimage
+        .as_deref()
+        .and_then(decode_hex)
+        .map(|b| sha256::Hash::hash(&b).to_string());
+    PayResponse {
+        // This node keys payments by hash, as `lookup_payment` does. An
+        // on-chain instruction has no hash, so the txid identifies it.
+        transaction_id: hash.clone().or_else(|| txid.clone()).unwrap_or_default(),
+        state: "settled".into(),
+        instruction_type: instruction_type.into(),
+        amount,
+        fees_paid,
+        payment_hash: hash,
+        preimage,
+        payer_proof: None,
+        txid,
+        failure_reason: None,
+        created_at: now(),
+        settled_at: Some(now()),
+    }
+}
+
+
+/// Hex to bytes, strictly 32 of them.
+fn decode_hex(s: &str) -> Option<Vec<u8>> {
+    if s.len() != 64 {
+        return None;
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
+        .collect()
 }

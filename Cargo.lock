@@ -980,7 +980,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2224,7 +2224,7 @@ dependencies = [
 [[package]]
 name = "nostr-ln"
 version = "0.1.0"
-source = "git+https://github.com/DarkWebDivingClub/nostr-ln.git?branch=master#bce5497318b3a68ad258723198e0d9d855d213a1"
+source = "git+https://github.com/DarkWebDivingClub/nostr-ln.git?branch=master#8098693717052df2a90d7a732ba3e93180717e7a"
 dependencies = [
  "futures",
  "nostr",
@@ -2239,7 +2239,7 @@ dependencies = [
 [[package]]
 name = "nostr-ln-macros"
 version = "0.1.0"
-source = "git+https://github.com/DarkWebDivingClub/nostr-ln.git?branch=master#bce5497318b3a68ad258723198e0d9d855d213a1"
+source = "git+https://github.com/DarkWebDivingClub/nostr-ln.git?branch=master#8098693717052df2a90d7a732ba3e93180717e7a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2271,7 +2271,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3006,7 +3006,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3459,7 +3459,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
