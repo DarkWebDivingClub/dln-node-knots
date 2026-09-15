@@ -108,7 +108,10 @@ async fn get_balance_reports_what_the_chain_paid_in() {
     assert_eq!(before.balance, 0);
 
     let address = ldk.new_onchain_address().expect("ldk address generation should work");
-    b.create_wallet("test").await;
+    // `BitcoindHarness::start` already created and loaded a wallet.
+    // Creating a second one leaves two loaded and `getnewaddress`
+    // ambiguous, which is what this test did until it was run.
+    //
     // Coinbase needs a hundred confirmations before it is spendable, which
     // is why this mines far more blocks than the payment needs.
     let miner = b.get_new_address().await;
@@ -233,6 +236,143 @@ async fn an_invalid_pubkey_fails_as_a_payment_failure() {
         .await
         .expect_err("it is not a pubkey");
     assert_eq!(e.code, ErrorCode::PaymentFailed);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn receive_generates_the_instructions_the_payee_asked_for() {
+    // **`pay` and `receive` had no test anywhere in this estate** before
+    // mission 26.2 — neither under these names nor under the old ones.
+    // The TypeScript client's on-chain suite was miscounted as one; it
+    // drives `ldk-controller`, which is a different repository.
+    let (_b, _ldk, w) = wallet("nwc-321-receive").await;
+    let k = Keys::generate();
+
+    let both = w
+        .receive(
+            ReceiveRequest {
+                amount: Some(50_000),
+                description: Some("order 123".into()),
+                methods: Some(vec![
+                    Bip321Method { method: "bolt11".into(), expiry: Some(3600), address_type: None },
+                    Bip321Method { method: "onchain".into(), expiry: None, address_type: None },
+                ]),
+                label: Some("Alice's Shop".into()),
+                ..Default::default()
+            },
+            caller(&k),
+        )
+        .await
+        .expect("receive");
+
+    assert!(both.bip321.starts_with("bitcoin:"), "{}", both.bip321);
+    assert!(both.bip321.contains("lightning="), "bolt11 was asked for");
+    assert!(
+        both.bip321.contains("label="),
+        "label is nwc-bip321.md's, and NWC-321 has no field for it —          losing it silently is what this asserts against: {}",
+        both.bip321
+    );
+
+    // BOLT-11 needs an amount, so without one it is skipped rather than
+    // failing the call: a URI offering the rest is a useful answer.
+    let no_amount = w
+        .receive(
+            ReceiveRequest {
+                methods: Some(vec![
+                    Bip321Method { method: "bolt11".into(), expiry: None, address_type: None },
+                    Bip321Method { method: "onchain".into(), expiry: None, address_type: None },
+                ]),
+                ..Default::default()
+            },
+            caller(&k),
+        )
+        .await
+        .expect("receive without an amount still yields a URI");
+    assert!(!no_amount.bip321.contains("lightning="), "bolt11 skipped");
+    assert!(no_amount.bip321.starts_with("bitcoin:"), "and the address remains");
+
+    // Omitting `methods` is NWC-321's behaviour exactly, which is the
+    // test of whether nwc-bip321.md is an extension or a change.
+    let wallet_chooses = w
+        .receive(ReceiveRequest { amount: Some(50_000), ..Default::default() }, caller(&k))
+        .await
+        .expect("receive with no methods");
+    assert!(wallet_chooses.bip321.starts_with("bitcoin:"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pay_refuses_a_uri_it_cannot_pay() {
+    let (_b, _ldk, w) = wallet("nwc-321-pay").await;
+    let k = Keys::generate();
+
+    // A URI naming an address but no amount. This node can pay on-chain
+    // instructions — `bip321_methods` says so — but not without knowing
+    // how much.
+    let e = w
+        .pay(
+            PayRequest {
+                payment: "bitcoin:bcrt1qexample".into(),
+                amount: None,
+                max_fee: None,
+                payer_note: None,
+                metadata: None,
+            },
+            caller(&k),
+        )
+        .await
+        .expect_err("no amount anywhere");
+    assert_eq!(e.code, ErrorCode::BadRequest);
+
+    // A well-formed URI carrying nothing this node pays is a different
+    // answer from a malformed one, and a client can tell them apart.
+    // `bitcoin:?somethingelse=1` is **not** this case — it fails to parse
+    // at all and is rightly a BAD_REQUEST, which is how the first draft of
+    // this test was wrong.
+    let e = w
+        .pay(
+            PayRequest {
+                // A **valid** BIP-321 URI carrying only a silent-payment
+                // instruction, which this node does not pay. It parses,
+                // so the URI is not the problem — the instruction is.
+                payment: "bitcoin:?sp=sp1qqtest".into(),
+                amount: Some(1_000),
+                max_fee: None,
+                payer_note: None,
+                metadata: None,
+            },
+            caller(&k),
+        )
+        .await
+        .expect_err("nothing payable");
+    assert_eq!(e.code, ErrorCode::UnsupportedPaymentInstruction);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn get_info_declares_what_pay_will_actually_pay() {
+    // `bip321_methods` is what makes the on-chain extension safe: `pay` is
+    // polymorphic, so implementing it says nothing about which
+    // instructions a wallet handles. A client holding a BOLT12-only URI
+    // learns from here rather than from a failure.
+    let (_b, _ldk, w) = wallet("nwc-321-discovery").await;
+    let k = Keys::generate();
+    let info = w.get_info(GetInfoRequest {}, caller(&k)).await.expect("get_info");
+
+    let declared = info.bip321_methods.expect("this node pays BIP-321 URIs");
+    let names: Vec<&str> = declared.iter().map(|m| m.method.as_str()).collect();
+    assert!(names.contains(&"bolt11") && names.contains(&"bolt12"));
+    assert!(
+        names.contains(&"onchain"),
+        "and onchain, which NWC-321 alone cannot report — declaring it is \
+         what entitles this node to use nwc-bip321.md's instruction_type"
+    );
+    assert!(
+        info.methods.contains(&"pay".to_string())
+            && info.methods.contains(&"receive".to_string()),
+        "under NWC-321's names, not ours"
+    );
+    assert!(
+        !info.methods.iter().any(|m| m.contains("bip321")),
+        "and pay_bip321 is gone from the advertisement entirely"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
