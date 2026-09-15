@@ -373,6 +373,15 @@ async fn get_info_declares_what_pay_will_actually_pay() {
         !info.methods.iter().any(|m| m.contains("bip321")),
         "and pay_bip321 is gone from the advertisement entirely"
     );
+    assert!(
+        !info.methods.contains(&"notifications".to_string()),
+        "`notifications` says what this node **sends** — it is the info \
+         event's tag, not a method a controller can call. The service \
+         macro generated it into this list from mission 25.3 until \
+         nostr-ln 6abc229, and this test did not catch it because it \
+         asserted what was present rather than what was not: {:?}",
+        info.methods
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
