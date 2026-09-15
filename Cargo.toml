@@ -9,7 +9,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
 nostr-sdk = { git = "https://github.com/dukeh3/nostr.git", rev = "9ac9adc2" }
-nostr-ln = { git = "https://github.com/DarkWebDivingClub/nostr-ln.git", branch = "master", features = ["transport"] }
+nostr-ln = { git = "https://github.com/DarkWebDivingClub/nostr-rs-ln.git", branch = "master", features = ["transport"] }
 nwc = { git = "https://github.com/dukeh3/nostr.git", rev = "9ac9adc2" }
 bip321 = { git = "https://github.com/DarkWebDivingClub/bip321.git", rev = "fcd4864" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
@@ -28,7 +28,7 @@ lightning-block-sync = { version = "0.2", optional = true }
 # The crate's own NNC client, to drive the node in tests the way a
 # controller would — rather than hand-rolling requests, which is how the
 # harness came to write `access_rate`.
-nostr-ln = { git = "https://github.com/DarkWebDivingClub/nostr-ln.git", branch = "master", features = ["client", "transport"] }
+nostr-ln = { git = "https://github.com/DarkWebDivingClub/nostr-rs-ln.git", branch = "master", features = ["client", "transport"] }
 testcontainers = "0.27"
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
